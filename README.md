@@ -59,6 +59,8 @@ logRejectedConnections=true
 
 `secret` 可以写 `dd0123...`、`ee0123...`，也可以只写 `0123...`。程序内部会取 16 字节 raw secret。
 
+仓库里提供了 `mtproxy.properties` 示例配置。下载代码后直接修改这个文件即可运行；提交公开仓库前不要把自己的真实 secret 提交上去。
+
 三个模式开关决定输出和接受哪些链接，可以只开一个，也可以同时开多个：
 
 ```text
