@@ -1,0 +1,10 @@
+secret=dd0123456789abcdef0123456789abcdef
+classic=false
+secure=false
+tls=true
+TLS_DOMAIN=www.cloudflare.com
+AD_TAG=
+port=8443
+connectTimeoutMillis=5000
+logAcceptedConnections=true
+logRejectedConnections=true
