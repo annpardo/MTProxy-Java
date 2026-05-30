@@ -49,6 +49,8 @@ logAcceptedConnections=true
 logRejectedConnections=true
 ```
 
+如果继续使用示例 `secret`，程序会正常启动，但会提示更换为随机生成的 secret。
+
 后端 DC 地址不再手动配置。当前 Java 实现使用内置 Telegram 直连静态 DC 地址表；DC1-5 不做动态更新，DC203/CDN 会参考 Telegram 官方 `getProxyConfig` / `getProxyConfigV6` 自动补充，失败时继续使用内置 DC203。
 
 ## 服务器放行

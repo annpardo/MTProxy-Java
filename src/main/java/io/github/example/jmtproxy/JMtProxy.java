@@ -95,6 +95,11 @@ public final class JMtProxy {
             "https://api6.ipify.org",
             "https://ifconfig.me/ip"
     );
+    private static final Set<String> DEFAULT_SECRETS = Set.of(
+            "00000000000000000000000000000000",
+            "00000000000000000000000000000001",
+            "0123456789abcdef0123456789abcdef"
+    );
     private static final String TELEGRAM_PROXY_CONFIG_IPV4 = "https://core.telegram.org/getProxyConfig";
     private static final String TELEGRAM_PROXY_CONFIG_IPV6 = "https://core.telegram.org/getProxyConfigV6";
     private static final String TELEGRAM_PROXY_SECRET = "https://core.telegram.org/getProxySecret";
@@ -271,16 +276,21 @@ public final class JMtProxy {
     public static void main(String[] args) throws Exception {
         Config config = Config.parse(args);
         if (config.generateSecretOnly()) {
-            byte[] secret = new byte[16];
-            new SecureRandom().nextBytes(secret);
-            System.out.println("Raw secret: " + Hex.encode(secret));
-            System.out.println("MTProxy dd secret: dd" + Hex.encode(secret));
+            String secret = randomSecretHex();
+            System.out.println("Raw secret: " + secret);
+            System.out.println("MTProxy dd secret: dd" + secret);
             return;
         }
 
         try (MtProxyServer server = new MtProxyServer(config)) {
             server.start();
         }
+    }
+
+    private static String randomSecretHex() {
+        byte[] secret = new byte[16];
+        new SecureRandom().nextBytes(secret);
+        return Hex.encode(secret);
     }
 
     static final class MtProxyServer implements AutoCloseable {
@@ -350,7 +360,12 @@ public final class JMtProxy {
             System.out.println("Java MTProxy：运行中");
             System.out.println("服务器IPV4/IPV6：" + publicHostSummary());
             System.out.println("服务端口：" + config.listenPort());
-            System.out.println("MTProxy Secret：" + Hex.encode(config.secret()));
+            String rawSecret = Hex.encode(config.secret());
+            System.out.println("MTProxy Secret：" + rawSecret);
+            if (DEFAULT_SECRETS.contains(rawSecret)) {
+                System.out.println("警告：当前使用默认示例 Secret，不建议使用");
+                System.out.println("建议替换为随机 Secret：" + randomSecretHex());
+            }
             if (config.adTag() != null) {
                 System.out.println("AD_TAG：已启用");
             }
