@@ -49,10 +49,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if gh release view latest >/dev/null 2>&1; then
+            gh release delete latest --yes --cleanup-tag
+          fi
           git tag -f latest
           git push -f origin latest
-          if gh release view latest >/dev/null 2>&1; then
-            gh release upload latest dist/server.jar --clobber
-          else
-            gh release create latest dist/server.jar --title "Latest build" --notes "Automatic build from $GITHUB_SHA" --latest
-          fi
+          gh release create latest dist/server.jar --title "Latest build" --notes "Automatic build from $GITHUB_SHA" --latest
