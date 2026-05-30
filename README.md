@@ -38,7 +38,7 @@
 配置文件字段：
 
 ```properties
-secret=dd0123456789abcdef0123456789abcdef
+secret=0123456789abcdef0123456789abcdef
 classic=false
 secure=false
 tls=true

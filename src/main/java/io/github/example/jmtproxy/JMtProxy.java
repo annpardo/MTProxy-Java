@@ -2486,7 +2486,7 @@ public final class JMtProxy {
             byte[] secret = new byte[16];
             new SecureRandom().nextBytes(secret);
             Properties properties = new Properties();
-            properties.setProperty("secret", "dd" + Hex.encode(secret));
+            properties.setProperty("secret", Hex.encode(secret));
             properties.setProperty("classic", envOrDefault("MTPROXY_CLASSIC", "false"));
             properties.setProperty("secure", envOrDefault("MTPROXY_SECURE", "false"));
             properties.setProperty("tls", envOrDefault("MTPROXY_TLS", "true"));
