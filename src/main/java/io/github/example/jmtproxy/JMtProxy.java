@@ -2340,9 +2340,7 @@ public final class JMtProxy {
             }
 
             String configPath = first(options, "config", envOrDefault("MTPROXY_CONFIG", "mtproxy.properties"));
-            boolean configPathWasExplicit = options.containsKey("config") || System.getenv("MTPROXY_CONFIG") != null;
-            boolean secretWasProvided = first(options, "secret", null) != null || hasEnv("MTPROXY_SECRET");
-            Properties fileConfig = loadFileConfig(configPath, configPathWasExplicit, !secretWasProvided);
+            Properties fileConfig = loadFileConfig(configPath);
 
             String secretText = optionEnvProperty(options, fileConfig, "secret", "MTPROXY_SECRET", "secret", null);
             if (secretText == null || secretText.isBlank()) {
@@ -2461,18 +2459,11 @@ public final class JMtProxy {
             return options;
         }
 
-        private static Properties loadFileConfig(String pathText, boolean required, boolean bootstrapIfMissing) {
+        private static Properties loadFileConfig(String pathText) {
             Properties properties = new Properties();
             Path path = Path.of(pathText);
             if (!Files.isRegularFile(path)) {
-                if (bootstrapIfMissing) {
-                    createBootstrapConfig(path);
-                    return loadFileConfig(pathText, required, false);
-                }
-                if (required) {
-                    throw new IllegalArgumentException("config file does not exist: " + path);
-                }
-                return properties;
+                throw new IllegalArgumentException("config file does not exist: " + path);
             }
             try (InputStream in = Files.newInputStream(path)) {
                 properties.load(in);
@@ -2480,33 +2471,6 @@ public final class JMtProxy {
                 throw new IllegalArgumentException("failed to read config file: " + path, e);
             }
             return properties;
-        }
-
-        private static void createBootstrapConfig(Path path) {
-            byte[] secret = new byte[16];
-            new SecureRandom().nextBytes(secret);
-            Properties properties = new Properties();
-            properties.setProperty("secret", Hex.encode(secret));
-            properties.setProperty("classic", envOrDefault("MTPROXY_CLASSIC", "false"));
-            properties.setProperty("secure", envOrDefault("MTPROXY_SECURE", "false"));
-            properties.setProperty("tls", envOrDefault("MTPROXY_TLS", "true"));
-            properties.setProperty("TLS_DOMAIN", envOrDefault("TLS_DOMAIN", "www.cloudflare.com"));
-            properties.setProperty("AD_TAG", envOrDefault("MTPROXY_AD_TAG", ""));
-            properties.setProperty("port", envOrDefault("MTPROXY_PORT", envOrDefault("SERVER_PORT", "8443")));
-            properties.setProperty("connectTimeoutMillis", envOrDefault("MTPROXY_CONNECT_TIMEOUT", "5000"));
-            properties.setProperty("logAcceptedConnections", envOrDefault("MTPROXY_LOG_ACCEPTED", "true"));
-            properties.setProperty("logRejectedConnections", envOrDefault("MTPROXY_LOG_REJECTED", "true"));
-            try {
-                Path parent = path.getParent();
-                if (parent != null) {
-                    Files.createDirectories(parent);
-                }
-                try (OutputStream out = Files.newOutputStream(path)) {
-                    properties.store(out, "Java MTProxy config. Edit this file, then restart the Java process.");
-                }
-            } catch (IOException e) {
-                throw new IllegalArgumentException("failed to create config file: " + path, e);
-            }
         }
 
         private static String optionEnvProperty(

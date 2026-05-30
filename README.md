@@ -15,9 +15,9 @@
 
 ## Pterodactyl
 
-面板里可以把 `build/server.jar` 上传成 `server.jar`。如果服务器根目录没有 `mtproxy.properties`，程序第一次启动会自动创建它，并尽量使用面板注入的 `SERVER_PORT` 作为监听端口。
+面板里可以把 `build/server.jar` 上传成 `server.jar`。服务器根目录需要先放好 `mtproxy.properties`，程序才会启动；通常可继续使用面板注入的 `SERVER_PORT` 作为监听端口。
 
-第一次启动后，程序会自动检测公网 IPv4/IPv6，并打印可用的 Telegram 链接。
+启动后，程序会自动检测公网 IPv4/IPv6，并打印可用的 Telegram 链接。
 
 ## 参数
 
