@@ -266,8 +266,8 @@ public final class JMtProxy {
             "secure",
             "tls",
             "ad-tag",
-            "log-accepted",
-            "log-rejected"
+            "log-connections",
+            "stats-print-period-minutes"
     );
 
     private JMtProxy() {
@@ -296,13 +296,16 @@ public final class JMtProxy {
     static final class MtProxyServer implements AutoCloseable {
         private final Config config;
         private final ExecutorService executor;
+        private final ScheduledExecutorService statsScheduler;
         private final Dc203Updater dc203Updater;
+        private final ProxyStats stats = new ProxyStats();
         private final List<ServerSocket> serverSockets = Collections.synchronizedList(new ArrayList<>());
         private final AtomicBoolean closed = new AtomicBoolean();
 
         MtProxyServer(Config config) {
             this.config = Objects.requireNonNull(config, "config");
             this.executor = Executors.newCachedThreadPool(new NamedThreadFactory("jmtproxy"));
+            this.statsScheduler = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("jmtproxy-stats"));
             this.dc203Updater = new Dc203Updater(config.dcMaps());
         }
 
@@ -314,6 +317,7 @@ public final class JMtProxy {
             }
 
             printStartupSummary();
+            startStatsPrinter();
             startStopCommandListener();
             Runtime.getRuntime().addShutdownHook(new Thread(() -> closeQuietly(this), "jmtproxy-shutdown"));
 
@@ -353,6 +357,18 @@ public final class JMtProxy {
             }, "jmtproxy-stdin-stop");
             thread.setDaemon(true);
             thread.start();
+        }
+
+        private void startStatsPrinter() {
+            if (config.statsPrintPeriodMinutes() <= 0) {
+                return;
+            }
+            statsScheduler.scheduleWithFixedDelay(
+                    stats::printSummary,
+                    config.statsPrintPeriodMinutes(),
+                    config.statsPrintPeriodMinutes(),
+                    TimeUnit.MINUTES
+            );
         }
 
         private void printStartupSummary() {
@@ -452,7 +468,7 @@ public final class JMtProxy {
                 try {
                     Socket client = socket.accept();
                     client.setTcpNoDelay(true);
-                    executor.execute(new ProxyConnection(client, config));
+                    executor.execute(new ProxyConnection(client, config, stats));
                 } catch (IOException e) {
                     if (!socket.isClosed()) {
                         log("accept failed on " + socket.getLocalSocketAddress() + ": " + e.getMessage());
@@ -473,6 +489,7 @@ public final class JMtProxy {
                 }
             }
             dc203Updater.close();
+            statsScheduler.shutdownNow();
             executor.shutdownNow();
         }
 
@@ -488,6 +505,46 @@ public final class JMtProxy {
                 closeable.close();
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    static final class ProxyStats {
+        private final AtomicLong connects = new AtomicLong();
+        private final AtomicLong currentConnects = new AtomicLong();
+        private final AtomicLong octetsFromClient = new AtomicLong();
+        private final AtomicLong octetsToClient = new AtomicLong();
+        private final AtomicLong msgsFromClient = new AtomicLong();
+        private final AtomicLong msgsToClient = new AtomicLong();
+
+        void connectionOpened() {
+            connects.incrementAndGet();
+            currentConnects.incrementAndGet();
+        }
+
+        void connectionClosed() {
+            currentConnects.updateAndGet(value -> value > 0 ? value - 1 : 0);
+        }
+
+        void recordFromClient(int bytes) {
+            octetsFromClient.addAndGet(bytes);
+            msgsFromClient.incrementAndGet();
+        }
+
+        void recordToClient(int bytes) {
+            octetsToClient.addAndGet(bytes);
+            msgsToClient.incrementAndGet();
+        }
+
+        void printSummary() {
+            long totalOctets = octetsFromClient.get() + octetsToClient.get();
+            long totalMsgs = msgsFromClient.get() + msgsToClient.get();
+            System.out.printf(Locale.ROOT,
+                    "%s Stats: %d connects (%d current), %.2f MB, %d msgs%n",
+                    Instant.now(),
+                    connects.get(),
+                    currentConnects.get(),
+                    totalOctets / 1_000_000.0,
+                    totalMsgs);
         }
     }
 
@@ -620,15 +677,18 @@ public final class JMtProxy {
     static final class ProxyConnection implements Runnable {
         private final Socket client;
         private final Config config;
+        private final ProxyStats stats;
 
-        ProxyConnection(Socket client, Config config) {
+        ProxyConnection(Socket client, Config config, ProxyStats stats) {
             this.client = client;
             this.config = config;
+            this.stats = stats;
         }
 
         @Override
         public void run() {
             String peer = String.valueOf(client.getRemoteSocketAddress());
+            boolean countedConnection = false;
             try (Socket clientSocket = client) {
                 ClientStreams clientStreams = FakeTls.tryAccept(
                         clientSocket.getInputStream(),
@@ -655,7 +715,9 @@ public final class JMtProxy {
                             config.middleProxyState().secret(),
                             config.publicHosts()
                     )) {
-                        if (config.logAcceptedConnections()) {
+                        stats.connectionOpened();
+                        countedConnection = true;
+                        if (config.logConnections()) {
                             Endpoint endpoint = connectedMiddle.endpoint();
                             log("accepted " + peer + ": dc=" + backendDc
                                     + " backend=" + endpoint.host() + ":" + endpoint.port()
@@ -667,11 +729,11 @@ public final class JMtProxy {
                         MiddleProxyConnection middleProxy = connectedMiddle.connection();
 
                         Thread upstream = new Thread(
-                                () -> pipe(clientStreams.input(), middleOut, handshake.clientToProxyCipher(), middleProxy.clientToBackend(), null, middle),
+                                () -> pipe(clientStreams.input(), middleOut, handshake.clientToProxyCipher(), middleProxy.clientToBackend(), null, middle, stats, true, config.logConnections()),
                                 "jmtproxy-upstream-" + peer
                         );
                         upstream.start();
-                        pipe(middleIn, clientStreams.output(), null, middleProxy.backendToClient(), handshake.proxyToClientCipher(), clientSocket);
+                        pipe(middleIn, clientStreams.output(), null, middleProxy.backendToClient(), handshake.proxyToClientCipher(), clientSocket, stats, false, config.logConnections());
                         closeQuietly(clientSocket);
                         closeQuietly(middle);
                         joinQuietly(upstream);
@@ -682,7 +744,9 @@ public final class JMtProxy {
                         throw new IOException("unsupported dc " + handshake.dcId());
                     }
                     try (ConnectedTelegram connectedTelegram = connectTelegram(endpoints, config.connectTimeoutMillis(), backendDc)) {
-                        if (config.logAcceptedConnections()) {
+                        stats.connectionOpened();
+                        countedConnection = true;
+                        if (config.logConnections()) {
                             Endpoint endpoint = connectedTelegram.endpoint();
                             log("accepted " + peer + ": dc=" + backendDc
                                     + " backend=" + endpoint.host() + ":" + endpoint.port());
@@ -692,21 +756,25 @@ public final class JMtProxy {
                         OutputStream telegramOut = telegram.getOutputStream();
 
                         Thread upstream = new Thread(
-                                () -> pipe(clientStreams.input(), telegramOut, handshake.clientToProxyCipher(), null, connectedTelegram.clientToBackendCipher(), telegram),
+                                () -> pipe(clientStreams.input(), telegramOut, handshake.clientToProxyCipher(), null, connectedTelegram.clientToBackendCipher(), telegram, stats, true, config.logConnections()),
                                 "jmtproxy-upstream-" + peer
                         );
                         upstream.start();
-                        pipe(telegramIn, clientStreams.output(), connectedTelegram.backendToClientCipher(), null, handshake.proxyToClientCipher(), clientSocket);
+                        pipe(telegramIn, clientStreams.output(), connectedTelegram.backendToClientCipher(), null, handshake.proxyToClientCipher(), clientSocket, stats, false, config.logConnections());
                         closeQuietly(clientSocket);
                         closeQuietly(telegram);
                         joinQuietly(upstream);
                     }
                 }
             } catch (Exception e) {
-                if (!config.logRejectedConnections()) {
+                if (!config.logConnections()) {
                     return;
                 }
                 log("closed " + peer + ": " + detailedMessage(e));
+            } finally {
+                if (countedConnection) {
+                    stats.connectionClosed();
+                }
             }
         }
 
@@ -732,13 +800,28 @@ public final class JMtProxy {
             return out.toString();
         }
 
-        private static void pipe(InputStream in, OutputStream out, Cipher decrypt, StreamTransform transform, Cipher encrypt, Socket closeOnError) {
+        private static void pipe(
+                InputStream in,
+                OutputStream out,
+                Cipher decrypt,
+                StreamTransform transform,
+                Cipher encrypt,
+                Socket closeOnError,
+                ProxyStats stats,
+                boolean fromClient,
+                boolean logConnections
+        ) {
             byte[] buffer = new byte[BUFFER_SIZE];
             try {
                 while (true) {
                     int read = in.read(buffer);
                     if (read < 0) {
                         break;
+                    }
+                    if (fromClient) {
+                        stats.recordFromClient(read);
+                    } else {
+                        stats.recordToClient(read);
                     }
                     byte[] chunk = Arrays.copyOf(buffer, read);
                     if (decrypt != null) {
@@ -757,7 +840,8 @@ public final class JMtProxy {
                 }
             } catch (IOException ignored) {
                 String message = ignored.getMessage();
-                if (message != null
+                if (logConnections
+                        && message != null
                         && !message.equals("Socket closed")
                         && !message.equals("Connection reset")
                         && !message.equals("Broken pipe")) {
@@ -2335,8 +2419,8 @@ public final class JMtProxy {
             byte[] secret,
             DcMaps dcMaps,
             int connectTimeoutMillis,
-            boolean logAcceptedConnections,
-            boolean logRejectedConnections,
+            boolean logConnections,
+            int statsPrintPeriodMinutes,
             String tlsDomain,
             Modes modes,
             byte[] adTag,
@@ -2351,7 +2435,7 @@ public final class JMtProxy {
             if (options.containsKey("generate-secret")) {
                 return new Config(443, List.of(new PublicHost("127.0.0.1", IpFamily.IPV4)), new byte[16],
                         new DcMaps(Collections.emptyMap(), Collections.emptyMap()),
-                        5000, true, true, "", new Modes(false, true, false), null, null, true);
+                        5000, false, 20, "", new Modes(false, true, false), null, null, true);
             }
 
             String configPath = first(options, "config", envOrDefault("MTPROXY_CONFIG", "mtproxy.properties"));
@@ -2367,10 +2451,13 @@ public final class JMtProxy {
             List<PublicHost> publicHosts = resolvePublicHosts();
             int timeout = parseInt(optionEnvProperty(options, fileConfig, "connect-timeout", "MTPROXY_CONNECT_TIMEOUT", "connectTimeoutMillis", "5000"),
                     "connect-timeout");
-            boolean logAccepted = parseBoolean(optionEnvProperty(options, fileConfig, "log-accepted", "MTPROXY_LOG_ACCEPTED", "logAcceptedConnections", "true"),
-                    "log-accepted");
-            boolean logRejected = parseBoolean(optionEnvProperty(options, fileConfig, "log-rejected", "MTPROXY_LOG_REJECTED", "logRejectedConnections", "true"),
-                    "log-rejected");
+            boolean logConnections = parseBoolean(optionEnvProperty(options, fileConfig, "log-connections", "MTPROXY_LOG_CONNECTIONS", "logConnections", "false"),
+                    "log-connections");
+            int statsPrintPeriodMinutes = parseInt(optionEnvProperty(options, fileConfig, "stats-print-period-minutes", "MTPROXY_STATS_PRINT_PERIOD_MINUTES", "statsPrintPeriodMinutes", "20"),
+                    "stats-print-period-minutes");
+            if (statsPrintPeriodMinutes < 0) {
+                throw new IllegalArgumentException("stats-print-period-minutes must be >= 0");
+            }
             String tlsDomain = tlsDomain(options, fileConfig);
             Modes modes = parseModes(options, fileConfig);
             if (modes.tls() && tlsDomain.isBlank()) {
@@ -2381,7 +2468,7 @@ public final class JMtProxy {
             MiddleProxyState middleProxyState = adTag == null ? null : MiddleProxyState.load(timeout);
 
             return new Config(listenPort, publicHosts, parseSecret(secretText),
-                    dcMaps, timeout, logAccepted, logRejected, tlsDomain, modes, adTag, middleProxyState, false);
+                    dcMaps, timeout, logConnections, statsPrintPeriodMinutes, tlsDomain, modes, adTag, middleProxyState, false);
         }
 
         String publicSecret(ProxyMode mode) {
@@ -2706,11 +2793,6 @@ public final class JMtProxy {
             return value == null || value.isBlank() ? fallback : value;
         }
 
-        private static boolean hasEnv(String name) {
-            String value = System.getenv(name);
-            return value != null && !value.isBlank();
-        }
-
         private static int parseInt(String value, String name) {
             try {
                 return Integer.parseInt(value);
@@ -2743,8 +2825,10 @@ public final class JMtProxy {
                       --port <port>               Bind port, default 443
                       --tls-domain <domain>       FakeTLS SNI/domain, used when tls=true
                       --connect-timeout <ms>      Telegram DC connect timeout, default 5000
-                      --log-accepted <true|false> Log successful MTProxy handshakes, default true
-                      --log-rejected <true|false> Log rejected/invalid connections, default true
+                      --log-connections <true|false>
+                                                  Log accepted/rejected connections, default false
+                      --stats-print-period-minutes <minutes>
+                                                  Print traffic stats periodically, default 20, 0 disables
 
                     Example:
                       java -jar target/jmtproxy-0.1.0.jar --secret dd0123456789abcdef0123456789abcdef --port 8443

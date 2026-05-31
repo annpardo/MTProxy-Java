@@ -60,8 +60,8 @@ public final class HandshakeSelfTest {
                         Map.of(2, List.of(new JMtProxy.Endpoint("2001:db8::2", 443)))
                 ),
                 5000,
-                true,
-                true,
+                false,
+                20,
                 "www.cloudflare.com",
                 new JMtProxy.Modes(false, true, false),
                 null,

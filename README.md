@@ -31,8 +31,10 @@
 --port <port>               监听端口，默认 443
 --tls-domain <domain>       FakeTLS SNI/domain，在 tls=true 时使用
 --connect-timeout <ms>      连接 Telegram DC 超时，默认 5000
---log-accepted <true|false> 记录成功握手，默认 true
---log-rejected <true|false> 记录失败连接，默认 true
+--log-connections <true|false>
+                            记录连接成功/失败日志，默认 false
+--stats-print-period-minutes <minutes>
+                            周期性打印连接、流量、消息数汇总，默认 20，0 表示关闭
 ```
 
 配置文件字段：
@@ -45,8 +47,8 @@ tls=true
 TLS_DOMAIN=www.cloudflare.com
 port=8443
 connectTimeoutMillis=5000
-logAcceptedConnections=true
-logRejectedConnections=true
+logConnections=false
+statsPrintPeriodMinutes=20
 ```
 
 如果继续使用示例 `secret`，程序会正常启动，但会提示更换为随机生成的 secret。
