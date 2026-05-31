@@ -2,42 +2,50 @@
 
 一个尽量小的 Java 版 Telegram MTProxy 服务端示例。当前实现支持 classic、`dd` secure 和 `ee` FakeTLS 三种模式，并支持 IPv4/IPv6 入口与后端 DC 转发。
 
+A small Java Telegram MTProxy server example. It supports classic, `dd` secure, and `ee` FakeTLS modes, plus IPv4/IPv6 public links and Telegram DC forwarding.
+
 > 注意：这不是官方 MTProxy 的完整替代品。它适合学习、内网实验、小规模自用；生产环境请额外考虑限速、监控、IP 封禁和 systemd/Docker 部署。
+>
+> Note: This is not a full replacement for the official MTProxy. It is intended for learning, lab use, and small private deployments. For production use, consider rate limiting, monitoring, IP blocking, and systemd/Docker deployment.
 
-## 功能
+## 功能 / Features
 
-- Java 17+，无第三方运行时依赖
-- 支持 classic raw secret、`dd` secret 和 `ee` FakeTLS secret
-- 按握手里的 DC id 转发到 Telegram DC
-- IPv4 客户端优先连接 Telegram IPv4 DC，IPv6 客户端优先连接 Telegram IPv6 DC，首选地址族失败时自动尝试备用地址族
-- 使用内置 Telegram 直连 DC 地址表，不开放手动 DC 配置；DC203/CDN 会参考官方 `getProxyConfig` 自动补充
-- 内置 secret 生成命令
+- Java 17+，无第三方运行时依赖 / Java 17+, no third-party runtime dependencies
+- 支持 classic raw secret、`dd` secret 和 `ee` FakeTLS secret / Supports classic raw secret, `dd` secret, and `ee` FakeTLS secret
+- 按握手里的 DC id 转发到 Telegram DC / Forwards to Telegram DCs according to the DC id in the handshake
+- IPv4 客户端优先连接 IPv4 DC，IPv6 客户端优先连接 IPv6 DC，首选地址族失败时自动尝试备用地址族 / IPv4 clients prefer IPv4 DCs, IPv6 clients prefer IPv6 DCs, with automatic fallback to the other address family
+- 使用内置 Telegram 直连 DC 地址表，不开放手动 DC 配置；DC203/CDN 会参考官方 `getProxyConfig` 自动补充 / Uses built-in Telegram direct DC addresses; manual DC configuration is not exposed. DC203/CDN is supplemented from official `getProxyConfig`
+- 内置 secret 生成命令 / Built-in secret generator
 
 ## Pterodactyl
 
 面板里可以把 `build/server.jar` 上传成 `server.jar`。服务器根目录需要先放好 `mtproxy.properties`，程序才会启动；通常可继续使用面板注入的 `SERVER_PORT` 作为监听端口。
 
+Upload `build/server.jar` as `server.jar` in the panel. Put `mtproxy.properties` in the server root before startup; the server will not start without a config file. Panel-provided `SERVER_PORT` can still be used as the default listen port.
+
 启动后，程序会自动检测公网 IPv4/IPv6，并打印可用的 Telegram 链接。
 
-## 参数
+After startup, the server detects public IPv4/IPv6 addresses and prints available Telegram proxy links.
+
+## 参数 / Options
 
 ```text
---generate-secret           生成 raw secret 和 dd-prefixed secret
---config <path>             配置文件路径，默认 mtproxy.properties
---secret <hex>              16 字节 hex secret，可带 dd 前缀
---classic <true|false>     是否启用 classic raw-secret 链接，默认 false
---secure <true|false>      是否启用 dd secure 链接，默认 false
---tls <true|false>         是否启用 ee FakeTLS 链接，默认 true
---port <port>               监听端口，默认 443
---tls-domain <domain>       FakeTLS SNI/domain，在 tls=true 时使用
---connect-timeout <ms>      连接 Telegram DC 超时，默认 5000
+--generate-secret           生成 raw secret 和 dd-prefixed secret / Generate raw and dd-prefixed secrets
+--config <path>             配置文件路径，默认 mtproxy.properties / Config file path, default mtproxy.properties
+--secret <hex>              16 字节 hex secret，可带 dd 前缀 / 16-byte hex secret, optional dd prefix
+--classic <true|false>      是否启用 classic raw-secret 链接，默认 false / Enable classic raw-secret links, default false
+--secure <true|false>       是否启用 dd secure 链接，默认 false / Enable dd secure links, default false
+--tls <true|false>          是否启用 ee FakeTLS 链接，默认 true / Enable ee FakeTLS links, default true
+--port <port>               监听端口，默认 443 / Bind port, default 443
+--tls-domain <domain>       FakeTLS SNI/domain，在 tls=true 时使用 / FakeTLS SNI/domain, used when tls=true
+--connect-timeout <ms>      连接 Telegram DC 超时，默认 5000 / Telegram DC connect timeout, default 5000
 --log-connections <true|false>
-                            记录连接成功/失败日志，默认 false
+                            记录连接成功/失败日志，默认 false / Log accepted/rejected connections, default false
 --stats-print-period-minutes <minutes>
-                            周期性打印连接、流量、消息数汇总，默认 20，0 表示关闭
+                            周期性打印连接、流量、消息数汇总，默认 20，0 表示关闭 / Print periodic connection, traffic, and message stats, default 20, 0 disables
 ```
 
-配置文件字段：
+## 配置文件字段 / Config Fields
 
 ```properties
 secret=0123456789abcdef0123456789abcdef
@@ -45,6 +53,7 @@ classic=false
 secure=false
 tls=true
 TLS_DOMAIN=www.cloudflare.com
+AD_TAG=
 port=8443
 connectTimeoutMillis=5000
 logConnections=false
@@ -53,24 +62,34 @@ statsPrintPeriodMinutes=20
 
 如果继续使用示例 `secret`，程序会正常启动，但会提示更换为随机生成的 secret。
 
+If the example `secret` is still used, the server starts normally but prints a warning and suggests a random replacement secret.
+
 后端 DC 地址不再手动配置。当前 Java 实现使用内置 Telegram 直连静态 DC 地址表；DC1-5 不做动态更新，DC203/CDN 会参考 Telegram 官方 `getProxyConfig` / `getProxyConfigV6` 自动补充，失败时继续使用内置 DC203。
 
-## 服务器放行
+Backend DC addresses are no longer manually configured. This Java implementation uses built-in Telegram direct DC addresses; DC1-5 are static, while DC203/CDN can be supplemented from Telegram's official `getProxyConfig` / `getProxyConfigV6`. If fetching fails, built-in DC203 remains in use.
+
+## 服务器放行 / Firewall
 
 云服务器安全组和系统防火墙都要放行你设置的端口，例如 `8443/tcp`。
 
+Allow the configured port in both the cloud security group and the system firewall, for example `8443/tcp`.
+
 Linux 上如果想监听 `443`，通常需要 root 权限，或者给 Java 二进制授予绑定低端口能力。
 
-## 验证
+On Linux, binding to `443` usually requires root privileges or granting the Java binary permission to bind low ports.
 
-项目带了一个无需 JUnit 的握手自测：
+## 验证 / Verification
+
+项目带了一个无需 JUnit 的握手自测。
+
+The project includes a handshake self-test that does not require JUnit.
 
 ```bash
 javac -d out $(find src/main/java src/test/java -name '*.java')
 java -cp out io.github.example.jmtproxy.HandshakeSelfTest
 ```
 
-PowerShell：
+PowerShell:
 
 ```powershell
 javac -d out (Get-ChildItem src/main/java,src/test/java -Recurse -Filter *.java)
