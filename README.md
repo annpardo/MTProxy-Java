@@ -74,7 +74,8 @@ java -cp out io.github.example.jmtproxy.HandshakeSelfTest
 ```
 
 PowerShell:
-
+## 友情链接
+https://linux.do/
 ```powershell
 javac -d out (Get-ChildItem src/main/java,src/test/java -Recurse -Filter *.java)
 java -cp out io.github.example.jmtproxy.HandshakeSelfTest
